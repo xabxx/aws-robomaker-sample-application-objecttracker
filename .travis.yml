@@ -1,0 +1,59 @@
+sudo: required
+language: generic
+notifications:
+  email:
+    on_success: change
+    on_failure: always
+    recipients:
+    - abbyxu@amazon.com
+env:
+  global:
+  - GITHUB_ACCOUNT=xabxx
+  - SA_NAME=aws-robomaker-sample-application-objecttracker
+  - secure: "QMTseb+4LoW5TPmRGffTOnjwvlos8TgsshOIJ+D/h8V0cGWuqjSK2sxWp7M2dLEzukOL7nN7VihT96FpVPVC0Haum8wDzE1KqpjwwQ0YfQFv+nUNeB2y+8Dj8w9j/ldhda7H5h9JHvxguCDU04E5T7ewOtmRwfm0eklmij31e+3+J65X/gG2rP1KlRs1V1HRjUreQRbtmNK6qNq2c5EnwGKCv6M/1hBItJ/hTsSGVr+NuwXg2C3VP6nClMQsDKqU8LVC3J42FfIkhc78S4/K8RJ17Ge9zwqZQK/jH1LBFmvgx49T/le3I4MdT5BPcKXAEeXlWfA4TeMjeQgSdDsKCFydBUxn4jApj9BJYnmO4f0e5mvvtSwK4RUevcoAnyNaBbXLtxlfl9QX/0n/dTfIPSvsbEbG5NmwtIXexDDOoZVR56WiJvqeuRSRrhhwgxFoVokrLIPl691j//ifqK9q1xHIA/minVtHrsH7kpksZt7qPuo2+pnV10d1+Y4r9ZyZOrbZmo1U2vdwI7TdeolcB+uq6z/o2Ec6Fo4CUq6onsnSsdQFjlMLIfToKEuAEmOZLOZTJbPOYdyz7EFzBPFEVuE1mHhlc/I7tL+Vdj5fnKnjK7AqIDWVoTt7+243pEbEVie2f2vKuoDhOXKzWv7WaZ8mr9PKxleqI5JHhg1YjeQ="
+  - secure: "mfsuicEl1gKo6TntH3HJxCtumKAMmtJd0mkBhc2ebPflvV+ufCmSn5GUHiEFGyeiUomO/hYXdFwGvII6/yAZNDGt2icuaGacaUZTWR2myMnNDcaSV28qLtelrIDv+3CSKWy0WrY6yiJYhHnxkLhd3AjOXql/Kr09y6jC/w0jy5S0dyW3R3QLdCKWRSNNMXxyzXGw1zDQsRkZfLgwU1X3s9h9CZZTAHG0u6RiEWvJpuIKuQbYe5L0ZCjtk/k35iG9yrbcGL2ZTVr0o3enz/1g0cFxatZTL0+7XBEUTH+D5EwGDW83DBRAWrfov7T5vpooNXj7w0nHsl/PDeRGC03uGOBRnFfnxtDwnHk2lIYqw/yXDXA8YqZ4ZH0D7Wj1rDdf37xD8I94pnHAOEr15GtpoWKREwyolVeifcQlDztfvyB9hTPq6CMVY4JueHISdBaNCsvAfCcB200Tp23JuLsbTv+Nlj+qr4jwdWAuglhBmfi3VAWsUiOy3dijAbwI7IL3KK/D63VvgsZLJF1ZWri3vmfIi4q4DYn6vhG9dysW7cVQFjNz9Bmi3thZbxy0YJ1bwcH1SR1s1it33FG+zVvXGdRXgyxx0ayIY+RC0RorneobnvUz8eeS9YqLF5u5pXLCqadsm0Q3Z1FYaH9d8KdnijIl5mn3r4Uey4hJo1NfKLw="
+  - AWS_DEFAULT_REGION=us-west-2
+  - CODE_PIPELINE_NAME=travis-test
+  matrix:
+  - ROS_DISTRO=kinetic ROS_VERSION=1
+  - ROS_DISTRO=lunar   ROS_VERSION=1
+  - ROS_DISTRO=melodic ROS_VERSION=1
+  - ROS_DISTRO=bouncy  ROS_VERSION=2
+  - ROS_DISTRO=crystal ROS_VERSION=2
+matrix:
+  allow_failures:
+  - env: ROS_DISTRO=lunar   ROS_VERSION=1
+  - env: ROS_DISTRO=melodic ROS_VERSION=1
+  - env: ROS_DISTRO=bouncy  ROS_VERSION=2
+  - env: ROS_DISTRO=crystal ROS_VERSION=2
+install:
+- git clone https://github.com/xabxx/travis-scripts.git .ros_ci
+script:
+- chmod +x .ros_ci/*
+- mkdir shared/
+- mv .ros_ci/ shared/
+- docker pull ros:"$ROS_DISTRO"-ros-core
+- docker run -v "$PWD/shared:/shared" -e ROS_DISTRO="$ROS_DISTRO" -e ROS_VERSION="$ROS_VERSION"
+  -e SA_NAME="$SA_NAME" --name "$ROS_DISTRO"-container -dit ros:"$ROS_DISTRO"-ros-core
+  /bin/bash
+- docker exec "$ROS_DISTRO"-container /bin/bash -c 'mkdir -p /"$ROS_DISTRO"_ws/'
+- docker cp $TRAVIS_BUILD_DIR "$ROS_DISTRO"-container:/"$ROS_DISTRO"_ws/
+- docker exec "$ROS_DISTRO"-container /bin/bash -c 'sh /shared/.ros_ci/ros"$ROS_VERSION"_sa_build.sh' || travis_terminate 1;
+before_deploy:
+- pwd
+- cd shared
+- zip -r output_o *
+- cd ..
+- pwd
+- mkdir -p to_upload
+- mv shared/output_o.zip to_upload/output_o.zip
+deploy:
+- provider: s3
+  local_dir: to_upload
+  skip_cleanup: true
+  on:
+    all_branches: true
+  bucket: sa-cloudwatch
+after_success:
+- pip install --user awscli
+- aws codepipeline start-pipeline-execution --name $CODE_PIPELINE_NAME
